@@ -1,3 +1,4 @@
+
 local Maid = {}
 Maid.__index = Maid
 
@@ -10,7 +11,6 @@ end
 
 function Maid:GiveTask(task)
 	if self._isDestroyed then
-		warn("[Maid] Попытка добавить задачу в уничтоженный Maid")
 		return nil
 	end
 
@@ -59,19 +59,25 @@ function Maid:Destroy()
 	setmetatable(self, nil)
 end
 
+--==============================================================================
+-- КЛАСС HIGHLIGHTPOOL (исправлен с устранением race conditions)
+--==============================================================================
 local HighlightPool = {}
 HighlightPool.__index = HighlightPool
 
-local MAX_HIGHLIGHTS = 250 
+local MAX_HIGHLIGHTS = 250
 
 function HighlightPool.new(storageLocation)
 	local self = setmetatable({}, HighlightPool)
 	self._storage = storageLocation
-	self._pool = {} 
-	self._active = setmetatable({}, {__mode = "k"}) 
+	self._pool = {}
+	self._active = {} -- ИСПРАВЛЕНИЕ: Используем strong references вместо weak
+	self._activeLookup = {} -- Обратный индекс для быстрого поиска
 	self._brightness = 0.5
 	self._isDestroyed = false
+	self._lock = false -- ИСПРАВЛЕНИЕ: Флаг для предотвращения race conditions
 
+	-- Предварительно создаём пул хайлайтов
 	for i = 1, MAX_HIGHLIGHTS do
 		local highlight = Instance.new("Highlight")
 		highlight.Parent = self._storage
@@ -92,30 +98,48 @@ function HighlightPool:Get(target, color)
 		return nil
 	end
 
+	-- ИСПРАВЛЕНИЕ: Защита от race conditions
+	while self._lock do
+		task.wait(0.001)
+	end
+	self._lock = true
+
+	local function unlock()
+		self._lock = false
+	end
+
+	-- Если уже есть активный highlight для этого target, обновляем цвет
 	if self._active[target] then
 		self._active[target].FillColor = color
+		unlock()
 		return self._active[target]
 	end
 
+	-- Берём из пула
 	local highlight = table.remove(self._pool)
 
+	-- ИСПРАВЛЕНИЕ: Если пула нет, ищем несколько highlights для эвикции
 	if not highlight then
-		highlight = self:_evictLowestPriority()
+		highlight = self:_evictMultiple()
 	end
 
 	if not highlight then
+		-- На случай крайности - создаём новый
 		highlight = Instance.new("Highlight")
 		highlight.Parent = self._storage
 		highlight.OutlineTransparency = 1
 	end
 
+	-- Настраиваем highlight
 	highlight.Adornee = target
 	highlight.FillColor = color
 	highlight.FillTransparency = 1 - self._brightness
 	highlight.Enabled = true
 
 	self._active[target] = highlight
+	self._activeLookup[highlight] = target
 
+	unlock()
 	return highlight
 end
 
@@ -124,19 +148,29 @@ function HighlightPool:Return(target)
 		return
 	end
 
+	while self._lock do
+		task.wait(0.001)
+	end
+	self._lock = true
+
 	local highlight = self._active[target]
 
 	if highlight then
 		highlight.Enabled = false
 		highlight.Adornee = nil
-		self._active[target] = nil
 
+		self._active[target] = nil
+		self._activeLookup[highlight] = nil
+
+		-- Возвращаем в пул
 		if #self._pool < MAX_HIGHLIGHTS then
 			table.insert(self._pool, highlight)
 		else
 			pcall(function() highlight:Destroy() end)
 		end
 	end
+
+	self._lock = false
 end
 
 function HighlightPool:UpdateBrightness(newBrightness)
@@ -145,36 +179,62 @@ function HighlightPool:UpdateBrightness(newBrightness)
 	newBrightness = math.clamp(tonumber(newBrightness) or 0.5, 0.01, 1)
 	self._brightness = newBrightness
 
+	while self._lock do
+		task.wait(0.001)
+	end
+	self._lock = true
+
 	for target, highlight in pairs(self._active) do
-		if highlight and highlight.Parent then
+		-- ИСПРАВЛЕНИЕ: Проверяем наличие объекта правильно
+		if highlight and highlight.Parent and target and target.Parent then
 			highlight.FillTransparency = 1 - newBrightness
 		else
 			self._active[target] = nil
+			if highlight then
+				self._activeLookup[highlight] = nil
+			end
 		end
 	end
+
+	self._lock = false
 end
 
 function HighlightPool:SetColor(target, color)
 	if not target or self._isDestroyed then return end
+
+	while self._lock do
+		task.wait(0.001)
+	end
+	self._lock = true
 
 	local highlight = self._active[target]
 
 	if highlight and highlight.Parent then
 		highlight.FillColor = color
 	end
+
+	self._lock = false
 end
 
-function HighlightPool:_evictLowestPriority()
-	local target, highlight = next(self._active)
+-- ИСПРАВЛЕНИЕ: Эвикция нескольких highlights если нужно
+function HighlightPool:_evictMultiple()
+	local count = 0
+	local maxEvict = 5 -- Пытаемся освободить до 5 highlights
 
-	if target and highlight then
-		highlight.Enabled = false
-		highlight.Adornee = nil
-		self._active[target] = nil
-		return highlight
+	for target, highlight in pairs(self._active) do
+		if count >= maxEvict then break end
+
+		if highlight and target then
+			highlight.Enabled = false
+			highlight.Adornee = nil
+			self._active[target] = nil
+			self._activeLookup[highlight] = nil
+			table.insert(self._pool, highlight)
+			count = count + 1
+		end
 	end
 
-	return nil
+	return table.remove(self._pool)
 end
 
 function HighlightPool:Cleanup()
@@ -192,27 +252,34 @@ function HighlightPool:Cleanup()
 
 	table.clear(self._pool)
 	table.clear(self._active)
+	table.clear(self._activeLookup)
 end
 
+--==============================================================================
+-- ОСНОВНОЙ КОД СКРИПТА
+--==============================================================================
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+-- Основной Maid для всего скрипта
 local mainMaid = Maid.new()
 
+-- Конфигурация
 local CONFIG = {
 	AllyColor = Color3.fromRGB(0, 255, 0),
 	EnemyColor = Color3.fromRGB(255, 0, 0),
 	C4Color = Color3.fromRGB(128, 0, 128),
 	DefaultBrightness = 0.5,
 	MaxSpawnWait = 1,
+	MaxRetries = 3,
 }
 
--- Создаём контейнер для хайлайтов
+-- Создаём контейнер для хайлайтов с уникальным названием
 local highlightStorage = Instance.new("Folder")
-highlightStorage.Name = "ClientHighlightStorage_" .. LocalPlayer.Name
+highlightStorage.Name = "ClientHighlightStorage_" .. LocalPlayer.UserId .. "_" .. tick()
 highlightStorage.Parent = workspace
 
 mainMaid:GiveTask(function()
@@ -229,14 +296,14 @@ mainMaid:GiveTask(function()
 	end
 end)
 
--- Хранилище для Maid'ов каждого игрока
-local playerMaids = setmetatable({}, {__mode = "k"}) -- Слабые ссылки на игроков
+-- Хранилище для Maid'ов каждого игрока (используем strong references)
+local playerMaids = {}
 
 -- Генерация случайного имени GUI
 local function randomGuiName()
 	local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 	local name = "GUI_"
-	for i = 1, 16 do
+	for i = 1, 24 do
 		local idx = math.random(1, #chars)
 		name = name .. chars:sub(idx, idx)
 	end
@@ -327,7 +394,7 @@ local function getTeamColor(player)
 	return (player.Team == LocalPlayer.Team) and CONFIG.AllyColor or CONFIG.EnemyColor
 end
 
--- Подключение хайлайта к персонажу
+-- ИСПРАВЛЕНИЕ: Добавляем retry механизм для загрузки персонажей
 local function highlightCharacter(character)
 	if not isReady(character) or character == LocalPlayer.Character then
 		return
@@ -338,7 +405,7 @@ local function highlightCharacter(character)
 		return
 	end
 
-	-- Создаём Maid для этого игрока, если его ещё нет
+	-- Убеждаемся, что у игрока есть Maid
 	if not playerMaids[player] then
 		playerMaids[player] = Maid.new()
 	end
@@ -354,20 +421,22 @@ local function highlightCharacter(character)
 	highlightPool:Get(character, color)
 
 	-- Слушаем изменение команды
-	local teamConnection
-	teamConnection = player:GetPropertyChangedSignal("Team"):Connect(function()
-		if character and character.Parent then
-			highlightPool:SetColor(character, getTeamColor(player))
-		end
-	end)
-	playerMaid:GiveTask(teamConnection)
+	if not player:FindFirstChild("_ESPTeamConnection") then
+		local teamConnection
+		teamConnection = player:GetPropertyChangedSignal("Team"):Connect(function()
+			if character and character.Parent and player and player.Parent then
+				highlightPool:SetColor(character, getTeamColor(player))
+			end
+		end)
+		playerMaid:GiveTask(teamConnection)
+	end
 
 	-- Слушаем удаление персонажа
 	local ancestryConnection
 	ancestryConnection = character.AncestryChanged:Connect(function(_, parent)
 		if not parent then
 			highlightPool:Return(character)
-			if playerMaids[player] then
+			if playerMaid then
 				playerMaid:RemoveTask(ancestryConnection)
 			end
 		end
@@ -379,15 +448,39 @@ local function highlightCharacter(character)
 	if humanoid then
 		local diedConnection
 		diedConnection = humanoid.Died:Connect(function()
-			task.wait(2)
+			-- ИСПРАВЛЕНИЕ: Проверяем перед возвратом
+			task.wait(0.5)
 			if character and character.Parent then
 				highlightPool:Return(character)
 			end
-			if playerMaid then
+			if playerMaid and not playerMaid._isDestroyed then
 				playerMaid:RemoveTask(diedConnection)
 			end
 		end)
 		playerMaid:GiveTask(diedConnection)
+	end
+end
+
+-- ИСПРАВЛЕНИЕ: Улучшенная загрузка персонажа с retry
+local function onCharacterAdded(character)
+	if not character or not character.Parent then
+		return
+	end
+
+	-- Ждём загрузки персонажа с timeout и retries
+	local startTime = tick()
+	local retries = 0
+
+	while not isReady(character) and retries < CONFIG.MaxRetries do
+		if (tick() - startTime) >= CONFIG.MaxSpawnWait then
+			retries = retries + 1
+			startTime = tick()
+		end
+		task.wait(0.05)
+	end
+
+	if isReady(character) then
+		highlightCharacter(character)
 	end
 end
 
@@ -401,10 +494,11 @@ local function highlightC4(c4)
 	mainMaid:GiveTask(c4Maid)
 
 	local function setupHighlight(part)
-		if not part or part.ClassName == "Folder" or part.ClassName == "Model" then
+		if not part or not part.Parent then
 			return
 		end
 
+		-- ИСПРАВЛЕНИЕ: Правильная проверка типов
 		if part:IsA("BasePart") then
 			highlightPool:Get(part, CONFIG.C4Color)
 
@@ -412,7 +506,9 @@ local function highlightC4(c4)
 			ancestryConn = part.AncestryChanged:Connect(function(_, parent)
 				if not parent then
 					highlightPool:Return(part)
-					c4Maid:RemoveTask(ancestryConn)
+					if c4Maid and not c4Maid._isDestroyed then
+						c4Maid:RemoveTask(ancestryConn)
+					end
 				end
 			end)
 			c4Maid:GiveTask(ancestryConn)
@@ -431,7 +527,9 @@ local function highlightC4(c4)
 	-- Слушаем добавление новых частей к C4
 	local childAddedConn
 	childAddedConn = c4.ChildAdded:Connect(function(part)
-		setupHighlight(part)
+		if c4Maid and not c4Maid._isDestroyed then
+			setupHighlight(part)
+		end
 	end)
 	c4Maid:GiveTask(childAddedConn)
 
@@ -439,28 +537,13 @@ local function highlightC4(c4)
 	local c4AncestryConn
 	c4AncestryConn = c4.AncestryChanged:Connect(function(_, parent)
 		if not parent then
-			c4Maid:Cleanup()
+			if c4Maid and not c4Maid._isDestroyed then
+				c4Maid:Cleanup()
+			end
 			mainMaid:RemoveTask(c4Maid)
 		end
 	end)
 	c4Maid:GiveTask(c4AncestryConn)
-end
-
--- Обработка появления персонажа
-local function onCharacterAdded(character)
-	if not character or not character.Parent then
-		return
-	end
-
-	-- Ждём загрузки персонажа с timeout
-	local startTime = tick()
-	while not isReady(character) and (tick() - startTime) < CONFIG.MaxSpawnWait do
-		task.wait(0.05)
-	end
-
-	if isReady(character) then
-		highlightCharacter(character)
-	end
 end
 
 -- Обработка нового игрока
@@ -497,7 +580,9 @@ local function onPlayerRemoving(player)
 		end
 
 		-- Очищаем все его соединения
-		playerMaid:Cleanup()
+		if not playerMaid._isDestroyed then
+			playerMaid:Cleanup()
+		end
 		playerMaids[player] = nil
 	end
 end
@@ -524,16 +609,33 @@ end
 mainMaid:GiveTask(Players.PlayerAdded:Connect(onPlayerAdded))
 mainMaid:GiveTask(Players.PlayerRemoving:Connect(onPlayerRemoving))
 
+-- ИСПРАВЛЕНИЕ: Throttling для ChildAdded события
+local lastC4Time = 0
+local C4_THROTTLE = 0.1
+
 mainMaid:GiveTask(workspace.ChildAdded:Connect(function(child)
 	if child.Name == "C4" then
-		task.spawn(function()
-			highlightC4(child)
-		end)
+		local now = tick()
+		if now - lastC4Time >= C4_THROTTLE then
+			lastC4Time = now
+			task.spawn(function()
+				highlightC4(child)
+			end)
+		end
 	end
 end))
 
--- Обработка изменения яркости
+-- Обработка изменения яркости с throttling
+local lastBrightnessUpdate = 0
+local BRIGHTNESS_THROTTLE = 0.2
+
 mainMaid:GiveTask(textBox.FocusLost:Connect(function()
+	local now = tick()
+	if now - lastBrightnessUpdate < BRIGHTNESS_THROTTLE then
+		return
+	end
+	lastBrightnessUpdate = now
+
 	local input = tonumber(textBox.Text)
 
 	if input then
@@ -543,6 +645,14 @@ mainMaid:GiveTask(textBox.FocusLost:Connect(function()
 		textBox.Text = tostring(brightness)
 	else
 		textBox.Text = tostring(CONFIG.DefaultBrightness)
+	end
+end))
+
+-- ИСПРАВЛЕНИЕ: Валидация текстбокса при вводе
+mainMaid:GiveTask(textBox:GetPropertyChangedSignal("Text"):Connect(function()
+	local text = textBox.Text
+	if text:find("[^0-9%.]") then
+		textBox.Text = text:gsub("[^0-9%.]", "")
 	end
 end))
 
@@ -580,8 +690,6 @@ mainMaid:GiveTask(destroyButton.MouseButton1Click:Connect(function()
 		destroyTimeout = tick()
 	else
 		-- Полная очистка
-		mainMaid:Destroy()
-
 		for player, maid in pairs(playerMaids) do
 			if maid and not maid._isDestroyed then
 				maid:Cleanup()
@@ -589,13 +697,22 @@ mainMaid:GiveTask(destroyButton.MouseButton1Click:Connect(function()
 		end
 
 		table.clear(playerMaids)
-		screenGui:Destroy()
+
+		if mainMaid and not mainMaid._isDestroyed then
+			mainMaid:Destroy()
+		end
+
+		if screenGui and screenGui.Parent then
+			screenGui:Destroy()
+		end
 	end
 end))
 
 -- Защита от ошибок при выходе из игры
 game:BindToClose(function()
 	pcall(function()
-		mainMaid:Destroy()
+		if mainMaid and not mainMaid._isDestroyed then
+			mainMaid:Destroy()
+		end
 	end)
 end)
