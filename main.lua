@@ -12,7 +12,7 @@ local brightness = 0.5
 local function randomGuiName()
 	local template = "{xxxx-xxxx-xxxx-xxxx}"
 	return template:gsub("x", function()
-		return string.char(math.random(48, 57)) 
+		return string.char(math.random(48, 57))
 	end)
 end
 
@@ -21,12 +21,21 @@ local guiName = randomGuiName()
 local screenGui = Instance.new("ScreenGui", PlayerGui)
 screenGui.Name = guiName
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder = 999999999
+screenGui.ResetOnSpawn = false
 
 local mainFrame = Instance.new("Frame", screenGui)
 mainFrame.Name = "Main"
 mainFrame.Size = UDim2.new(0, 150, 0, 77)
 mainFrame.Position = UDim2.new(0.01, 0, 0.017, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+mainFrame.ZIndex = 999999999
+local gradient = Instance.new("UIGradient", mainFrame)
+gradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(98, 28, 126)),
+	ColorSequenceKeypoint.new(0.314, Color3.fromRGB(66, 19, 81)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(37, 11, 46)),
+})
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 20)
 
 local textBox = Instance.new("TextBox", mainFrame)
@@ -36,6 +45,8 @@ textBox.PlaceholderText = "0.01 - 1"
 textBox.Text = tostring(brightness)
 textBox.BackgroundColor3 = Color3.fromRGB(192, 194, 227)
 textBox.Font = Enum.Font.Jura
+textBox.TextScaled = true
+textBox.ZIndex = 999999999
 Instance.new("UICorner", textBox).CornerRadius = UDim.new(0, 15)
 
 local hideButton = Instance.new("TextButton", mainFrame)
@@ -44,6 +55,9 @@ hideButton.Size = UDim2.new(0, 137, 0, 15)
 hideButton.Text = "Hide - RCtrl"
 hideButton.Position = UDim2.new(0.036, 0, 0.5, 0)
 hideButton.BackgroundColor3 = Color3.fromRGB(192, 194, 227)
+hideButton.Font = Enum.Font.Jura
+hideButton.TextScaled = true
+hideButton.ZIndex = 999999999
 Instance.new("UICorner", hideButton).CornerRadius = UDim.new(0, 15)
 Instance.new("UIStroke", hideButton).Color = Color3.fromRGB(205, 205, 205)
 
@@ -53,6 +67,9 @@ destroyButton.Size = UDim2.new(0, 137, 0, 15)
 destroyButton.Text = "Destroy"
 destroyButton.Position = UDim2.new(0.036, 0, 0.745, 0)
 destroyButton.BackgroundColor3 = Color3.fromRGB(192, 194, 227)
+destroyButton.Font = Enum.Font.Jura
+destroyButton.TextScaled = true
+destroyButton.ZIndex = 999999999
 Instance.new("UICorner", destroyButton).CornerRadius = UDim.new(0, 15)
 Instance.new("UIStroke", destroyButton).Color = Color3.fromRGB(205, 205, 205)
 
@@ -85,8 +102,7 @@ local function highlight(model)
 	h.FillColor = (plr.Team == LocalPlayer.Team) and ally or enemy
 	applyBrightness(h)
 
-	local connection
-	connection = plr:GetPropertyChangedSignal("Team"):Connect(function()
+	plr:GetPropertyChangedSignal("Team"):Connect(function()
 		h.FillColor = (plr.Team == LocalPlayer.Team) and ally or enemy
 	end)
 end
