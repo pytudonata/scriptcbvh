@@ -89,6 +89,13 @@ local function applyBrightness(highlight)
 	highlight.FillTransparency = 1 - brightness
 end
 
+local function updateHighlightColor(model, h)
+	local plr = getPlayer(model)
+	if not plr then return end
+	
+	h.FillColor = (plr.Team == LocalPlayer.Team) and ally or enemy
+end
+
 local function highlight(model)
 	if not isReady(model) then return end
 	if model == LocalPlayer.Character then return end
@@ -99,11 +106,13 @@ local function highlight(model)
 	local h = model:FindFirstChild("Highlight") or Instance.new("Highlight")
 	h.Parent = model
 	h.OutlineTransparency = 1
-	h.FillColor = (plr.Team == LocalPlayer.Team) and ally or enemy
+	updateHighlightColor(model, h)
 	applyBrightness(h)
 
 	plr:GetPropertyChangedSignal("Team"):Connect(function()
-		h.FillColor = (plr.Team == LocalPlayer.Team) and ally or enemy
+		if h and h.Parent then
+			updateHighlightColor(model, h)
+		end
 	end)
 end
 
@@ -132,6 +141,34 @@ local function updateHighlights(state)
 		end
 	end
 end
+
+task.spawn(function()
+	while task.wait(0.5) do
+		for _, model in ipairs(workspace:GetDescendants()) do
+			local highlight = model:FindFirstChild("Highlight")
+			if highlight and model ~= LocalPlayer.Character then
+				local plr = getPlayer(model)
+				if plr then
+					updateHighlightColor(model, highlight)
+				end
+			end
+		end
+	end
+end)
+
+LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+	task.delay(0.1, function()
+		for _, model in ipairs(workspace:GetDescendants()) do
+			local highlight = model:FindFirstChild("Highlight")
+			if highlight and model ~= LocalPlayer.Character then
+				local plr = getPlayer(model)
+				if plr then
+					updateHighlightColor(model, highlight)
+				end
+			end
+		end
+	end)
+end)
 
 local function connectModel(model)
 	if isReady(model) then
