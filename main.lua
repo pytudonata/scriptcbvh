@@ -150,11 +150,15 @@ for _, obj in ipairs(workspace:GetDescendants()) do
 end
 
 workspace.DescendantAdded:Connect(function(obj)
-	if obj:IsA("Model") then
+	if obj:IsA("Model") and obj.Name ~= "C4" then
 		connectModel(obj)
-	elseif obj.Name == "C4" then
-		highlightC4(obj)
 	end
+end)
+
+workspace.ChildAdded:Connect(function(obj)
+    if obj.Name == "C4" then
+        highlightC4(obj)
+    end
 end)
 
 for _, plr in ipairs(Players:GetPlayers()) do
