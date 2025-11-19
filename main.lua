@@ -1,425 +1,195 @@
 local Players = game:GetService("Players")
-
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Cache = {}
+local Connections = {}
+local Settings = {
+    Enabled = true,
+    Brightness = 0.5,
+    AllyColor = Color3.fromRGB(0, 255, 0),
+    EnemyColor = Color3.fromRGB(255, 0, 0),
+    C4Color = Color3.fromRGB(128, 0, 128)
+}
 
-
-
-local ally = Color3.fromRGB(0, 255, 0)
-
-local enemy = Color3.fromRGB(255, 0, 0)
-
-local c4Color = Color3.fromRGB(128, 0, 128)
-
-local highlightsEnabled = true
-
-local brightness = 0.5
-
-
-
-local function randomGuiName()
-
-	local template = "{xxxx-xxxx-xxxx-xxxx}"
-
-	return template:gsub("x", function()
-
-		return string.char(math.random(48, 57))
-
-	end)
-
+local function RandomString()
+    return string.char(math.random(97, 122))..string.char(math.random(97, 122))..math.random(1000, 9999)
 end
 
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = RandomString()
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn = false
+if pcall(function() ScreenGui.Parent = CoreGui end) then else ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Name = "Main"
+MainFrame.Size = UDim2.new(0, 150, 0, 85)
+MainFrame.Position = UDim2.new(0.02, 0, 0.25, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.Active = true
+MainFrame.Draggable = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
 
-local guiName = randomGuiName()
-
-
-
-local screenGui = Instance.new("ScreenGui", PlayerGui)
-
-screenGui.Name = guiName
-
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-screenGui.DisplayOrder = 999999999
-
-screenGui.ResetOnSpawn = false
-
-
-
-local mainFrame = Instance.new("Frame", screenGui)
-
-mainFrame.Name = "Main"
-
-mainFrame.Size = UDim2.new(0, 150, 0, 77)
-
-mainFrame.Position = UDim2.new(0.01, 0, 0.017, 0)
-
-mainFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-
-mainFrame.ZIndex = 999999999
-
-local gradient = Instance.new("UIGradient", mainFrame)
-
-gradient.Color = ColorSequence.new({
-
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(98, 28, 126)),
-
-	ColorSequenceKeypoint.new(0.314, Color3.fromRGB(66, 19, 81)),
-
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(37, 11, 46)),
-
+local Gradient = Instance.new("UIGradient", MainFrame)
+Gradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(98, 28, 126)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(37, 11, 46))
 })
 
-Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 20)
+local BrightnessBox = Instance.new("TextBox", MainFrame)
+BrightnessBox.Size = UDim2.new(0, 130, 0, 20)
+BrightnessBox.Position = UDim2.new(0.065, 0, 0.12, 0)
+BrightnessBox.Text = tostring(Settings.Brightness)
+BrightnessBox.PlaceholderText = "0.1 - 1"
+BrightnessBox.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+Instance.new("UICorner", BrightnessBox).CornerRadius = UDim.new(0, 6)
 
+local HideButton = Instance.new("TextButton", MainFrame)
+HideButton.Size = UDim2.new(0, 130, 0, 20)
+HideButton.Position = UDim2.new(0.065, 0, 0.42, 0)
+HideButton.Text = "Hide GUI (RCtrl)"
+HideButton.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+Instance.new("UICorner", HideButton).CornerRadius = UDim.new(0, 6)
 
+local DestroyButton = Instance.new("TextButton", MainFrame)
+DestroyButton.Size = UDim2.new(0, 130, 0, 20)
+DestroyButton.Position = UDim2.new(0.065, 0, 0.72, 0)
+DestroyButton.Text = "Destroy"
+DestroyButton.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+Instance.new("UICorner", DestroyButton).CornerRadius = UDim.new(0, 6)
 
-local textBox = Instance.new("TextBox", mainFrame)
-
-textBox.Size = UDim2.new(0, 127, 0, 24)
-
-textBox.Position = UDim2.new(0.07, 0, 0.1, 0)
-
-textBox.PlaceholderText = "0.01 - 1"
-
-textBox.Text = tostring(brightness)
-
-textBox.BackgroundColor3 = Color3.fromRGB(192, 194, 227)
-
-textBox.Font = Enum.Font.Jura
-
-textBox.TextScaled = true
-
-textBox.ZIndex = 999999999
-
-Instance.new("UICorner", textBox).CornerRadius = UDim.new(0, 15)
-
-
-
-local hideButton = Instance.new("TextButton", mainFrame)
-
-hideButton.Name = "Hide"
-
-hideButton.Size = UDim2.new(0, 137, 0, 15)
-
-hideButton.Text = "Hide - RCtrl"
-
-hideButton.Position = UDim2.new(0.036, 0, 0.5, 0)
-
-hideButton.BackgroundColor3 = Color3.fromRGB(192, 194, 227)
-
-hideButton.Font = Enum.Font.Jura
-
-hideButton.TextScaled = true
-
-hideButton.ZIndex = 999999999
-
-Instance.new("UICorner", hideButton).CornerRadius = UDim.new(0, 15)
-
-Instance.new("UIStroke", hideButton).Color = Color3.fromRGB(205, 205, 205)
-
-
-
-local destroyButton = Instance.new("TextButton", mainFrame)
-
-destroyButton.Name = "Destroy"
-
-destroyButton.Size = UDim2.new(0, 137, 0, 15)
-
-destroyButton.Text = "Destroy"
-
-destroyButton.Position = UDim2.new(0.036, 0, 0.745, 0)
-
-destroyButton.BackgroundColor3 = Color3.fromRGB(192, 194, 227)
-
-destroyButton.Font = Enum.Font.Jura
-
-destroyButton.TextScaled = true
-
-destroyButton.ZIndex = 999999999
-
-Instance.new("UICorner", destroyButton).CornerRadius = UDim.new(0, 15)
-
-Instance.new("UIStroke", destroyButton).Color = Color3.fromRGB(205, 205, 205)
-
-
-
-local function isReady(model)
-
-	return model:FindFirstChildOfClass("Humanoid") and model:FindFirstChild("Head")
-
+local function GetColor(player)
+    if not player then return Settings.C4Color end
+    if player.Team == LocalPlayer.Team then return Settings.AllyColor end
+    return Settings.EnemyColor
 end
 
-
-
-local function getPlayer(model)
-
-	for _, plr in ipairs(Players:GetPlayers()) do
-
-		if plr.Character == model then
-
-			return plr
-
-		end
-
-	end
-
+local function AddHighlight(model, player)
+    if model:FindFirstChild("OptimizedESP") then return end
+    
+    local hl = Instance.new("Highlight")
+    hl.Name = "OptimizedESP"
+    hl.FillTransparency = 1 - Settings.Brightness
+    hl.OutlineTransparency = 1
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = model
+    
+    table.insert(Cache, {
+        Model = model,
+        Highlight = hl,
+        Player = player,
+        IsC4 = (player == nil)
+    })
 end
 
-
-
-local function applyBrightness(highlight)
-
-	highlight.FillTransparency = 1 - brightness
-
-end
-
-
-
-local function highlight(model)
-
-	if not isReady(model) then return end
-
-	if model == LocalPlayer.Character then return end
-
-
-
-	local plr = getPlayer(model)
-
-	if not plr then return end
-
-
-
-	local h = model:FindFirstChild("Highlight") or Instance.new("Highlight")
-
-	h.Parent = model
-
-	h.OutlineTransparency = 1
-
-	h.FillColor = (plr.Team == LocalPlayer.Team) and ally or enemy
-
-	applyBrightness(h)
-
-
-
-	plr:GetPropertyChangedSignal("Team"):Connect(function()
-
-		h.FillColor = (plr.Team == LocalPlayer.Team) and ally or enemy
-
-	end)
-
-end
-
-
-
-local function highlightC4(c4)
-
-	if c4:IsA("BasePart") then
-
-		local h = c4:FindFirstChild("Highlight") or Instance.new("Highlight")
-
-		h.Parent = c4
-
-		h.FillColor = c4Color
-
-		applyBrightness(h)
-
-	elseif c4:IsA("Model") then
-
-		for _, part in ipairs(c4:GetDescendants()) do
-
-			if part:IsA("BasePart") then
-
-				local h = part:FindFirstChild("Highlight") or Instance.new("Highlight")
-
-				h.Parent = part
-
-				h.FillColor = c4Color
-
-				applyBrightness(h)
-
-			end
-
-		end
-
-	end
-
-end
-
-
-
-local function updateHighlights(state)
-
-	for _, model in ipairs(workspace:GetDescendants()) do
-
-		if model:FindFirstChild("Highlight") then
-
-			model.Highlight.Enabled = state
-
-		end
-
-	end
-
-end
-
-
-
-local function connectModel(model)
-
-	if isReady(model) then
-
-		highlight(model)
-
-	else
-
-		model.ChildAdded:Connect(function()
-
-			if isReady(model) then
-
-				highlight(model)
-
-			end
-
-		end)
-
-	end
-
-end
-
-
-
-for _, obj in ipairs(workspace:GetDescendants()) do
-
-	if obj:IsA("Model") then connectModel(obj) end
-
-end
-
-
-
-workspace.DescendantAdded:Connect(function(obj)
-
-	if obj:IsA("Model") and obj.Name ~= "C4" then
-
-		connectModel(obj)
-
-	end
-
-end)
-
-
-
-workspace.ChildAdded:Connect(function(obj)
-
-    if obj.Name == "C4" then
-
-        highlightC4(obj)
-
+local function RemoveFromCache(model)
+    for i, v in ipairs(Cache) do
+        if v.Model == model then
+            table.remove(Cache, i)
+            break
+        end
     end
-
-end)
-
-
-
-for _, plr in ipairs(Players:GetPlayers()) do
-
-	if plr.Character then connectModel(plr.Character) end
-
-	plr.CharacterAdded:Connect(connectModel)
-
 end
 
-
-
-textBox.FocusLost:Connect(function()
-
-	local input = tonumber(textBox.Text)
-
-	if input then
-
-		brightness = math.clamp(input, 0.01, 1)
-
-		for _, h in ipairs(workspace:GetDescendants()) do
-
-			if h:IsA("Highlight") then
-
-				applyBrightness(h)
-
-			end
-
-		end
-
-	else
-
-		textBox.Text = tostring(brightness)
-
-	end
-
-end)
-
-
-
-local hideState = false
-
-local function toggleVisibility()
-
-	hideState = not hideState
-
-	screenGui.Enabled = not hideState
-
-	updateHighlights(not hideState and highlightsEnabled)
-
+local function OnCharacterAdded(char, player)
+    if char then
+        char:WaitForChild("HumanoidRootPart", 5)
+        AddHighlight(char, player)
+    end
 end
 
+local function OnPlayerAdded(player)
+    if player == LocalPlayer then return end
+    if player.Character then OnCharacterAdded(player.Character, player) end
+    table.insert(Connections, player.CharacterAdded:Connect(function(c) OnCharacterAdded(c, player) end))
+    table.insert(Connections, player.CharacterRemoving:Connect(RemoveFromCache))
+end
 
+for _, p in ipairs(Players:GetPlayers()) do OnPlayerAdded(p) end
+table.insert(Connections, Players.PlayerAdded:Connect(OnPlayerAdded))
 
-hideButton.MouseButton1Click:Connect(toggleVisibility)
+table.insert(Connections, Workspace.DescendantAdded:Connect(function(obj)
+    if obj.Name == "C4" and (obj:IsA("Model") or obj:IsA("BasePart")) then
+        AddHighlight(obj, nil)
+    end
+end))
 
+for _, obj in ipairs(Workspace:GetDescendants()) do
+    if obj.Name == "C4" then AddHighlight(obj, nil) end
+end
 
+table.insert(Connections, RunService.RenderStepped:Connect(function()
+    if not Settings.Enabled then return end
+    
+    local camPos = Camera.CFrame.Position
+    local validTargets = {}
+    
+    for i = #Cache, 1, -1 do
+        local entry = Cache[i]
+        if entry.Model and entry.Model.Parent then
+            local pos
+            if entry.IsC4 then
+                pos = entry.Model:IsA("Model") and entry.Model:GetPivot().Position or entry.Model.Position
+            else
+                pos = entry.Model.PrimaryPart and entry.Model.PrimaryPart.Position
+            end
 
-local destroyTimeout = nil
+            if pos then
+                entry.Dist = (camPos - pos).Magnitude
+                entry.Highlight.FillColor = GetColor(entry.Player)
+                entry.Highlight.FillTransparency = 1 - Settings.Brightness
+                table.insert(validTargets, entry)
+            else
+                entry.Highlight.Enabled = false
+            end
+        else
+            table.remove(Cache, i)
+        end
+    end
+    
+    table.sort(validTargets, function(a, b)
+        local distA = a.IsC4 and -1 or a.Dist
+        local distB = b.IsC4 and -1 or b.Dist
+        return distA < distB
+    end)
+    
+    for i, entry in ipairs(validTargets) do
+        entry.Highlight.Enabled = (i <= 31)
+    end
+end))
 
-destroyButton.MouseButton1Click:Connect(function()
-
-	if not destroyTimeout then
-
-		destroyButton.Text = "You sure?"
-
-		destroyTimeout = true
-
-		task.delay(5, function()
-
-			if destroyTimeout then
-
-				destroyButton.Text = "Destroy"
-
-				destroyTimeout = nil
-
-			end
-
-		end)
-
-	else
-
-		screenGui:Destroy()
-
-		updateHighlights(false)
-
-	end
-
+BrightnessBox.FocusLost:Connect(function()
+    local num = tonumber(BrightnessBox.Text)
+    if num then Settings.Brightness = math.clamp(num, 0, 1) end
 end)
 
+local visible = true
+local function ToggleUI()
+    visible = not visible
+    MainFrame.Visible = visible
+end
 
+HideButton.MouseButton1Click:Connect(ToggleUI)
+table.insert(Connections, UserInputService.InputBegan:Connect(function(io, gp)
+    if not gp and io.KeyCode == Enum.KeyCode.RightControl then ToggleUI() end
+end))
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-
-	if input.KeyCode == Enum.KeyCode.RightControl and not gameProcessed then
-
-		toggleVisibility()
-
-	end
-
-end) 
+local confirm = false
+DestroyButton.MouseButton1Click:Connect(function()
+    if not confirm then
+        confirm = true
+        DestroyButton.Text = "Confirm?"
+        task.delay(2, function() confirm = false DestroyButton.Text = "Destroy" end)
+    else
+        Settings.Enabled = false
+        for _, c in ipairs(Connections) do c:Disconnect() end
+        for _, v in ipairs(Cache) do if v.Highlight then v.Highlight:Destroy() end end
+        ScreenGui:Destroy()
+    end
+end)
