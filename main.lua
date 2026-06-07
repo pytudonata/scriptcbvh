@@ -13,8 +13,7 @@ local Settings = {
     Enabled = true,
     Brightness = 0.5,
     AllyColor = Color3.fromRGB(0, 255, 0),
-    EnemyColor = Color3.fromRGB(255, 0, 0),
-    C4Color = Color3.fromRGB(128, 0, 128)
+    EnemyColor = Color3.fromRGB(255, 0, 0)
 }
 
 local function RandomString()
@@ -64,9 +63,27 @@ DestroyButton.Text = "Destroy"
 DestroyButton.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
 Instance.new("UICorner", DestroyButton).CornerRadius = UDim.new(0, 6)
 
-local function GetColor(player)
-    if not player then return Settings.C4Color end
-    if player.Team == LocalPlayer.Team then return Settings.AllyColor end
+local function GetColor(model)
+    local player = Players:GetPlayerFromCharacter(model)
+    local localTeam = LocalPlayer.Team and LocalPlayer.Team.Name
+    
+    -- Если стандартные команды не определены, чекаем по родительской папке из image_2141c1.png
+    if model.Parent then
+        local folderName = model.Parent.Name
+        if localTeam then
+            if folderName == localTeam then return Settings.AllyColor end
+        else
+            -- На случай, если у локального игрока нет команды, проверяем имя его персонажа в папках
+            local ctFolder = Workspace:FindFirstChild("Characters") and Workspace.Characters:FindFirstChild("Counter-Terrorists")
+            local tFolder = Workspace:FindFirstChild("Characters") and Workspace.Characters:FindFirstChild("Terrorists")
+            
+            if ctFolder and ctFolder:FindFirstChild(LocalPlayer.Name) then
+                if folderName == "Counter-Terrorists" then return Settings.AllyColor end
+            elseif tFolder and tFolder:FindFirstChild(LocalPlayer.Name) then
+                if folderName == "Terrorists" then return Settings.AllyColor end
+            end
+        end
+    end
     return Settings.EnemyColor
 end
 
@@ -83,8 +100,7 @@ local function AddHighlight(model, player)
     table.insert(Cache, {
         Model = model,
         Highlight = hl,
-        Player = player,
-        IsC4 = (player == nil)
+        Player = player
     })
 end
 
@@ -114,16 +130,6 @@ end
 for _, p in ipairs(Players:GetPlayers()) do OnPlayerAdded(p) end
 table.insert(Connections, Players.PlayerAdded:Connect(OnPlayerAdded))
 
-table.insert(Connections, Workspace.DescendantAdded:Connect(function(obj)
-    if obj.Name == "C4" and (obj:IsA("Model") or obj:IsA("BasePart")) then
-        AddHighlight(obj, nil)
-    end
-end))
-
-for _, obj in ipairs(Workspace:GetDescendants()) do
-    if obj.Name == "C4" then AddHighlight(obj, nil) end
-end
-
 table.insert(Connections, RunService.RenderStepped:Connect(function()
     if not Settings.Enabled then return end
     
@@ -133,16 +139,11 @@ table.insert(Connections, RunService.RenderStepped:Connect(function()
     for i = #Cache, 1, -1 do
         local entry = Cache[i]
         if entry.Model and entry.Model.Parent then
-            local pos
-            if entry.IsC4 then
-                pos = entry.Model:IsA("Model") and entry.Model:GetPivot().Position or entry.Model.Position
-            else
-                pos = entry.Model.PrimaryPart and entry.Model.PrimaryPart.Position
-            end
+            local pos = entry.Model.PrimaryPart and entry.Model.PrimaryPart.Position
 
             if pos then
                 entry.Dist = (camPos - pos).Magnitude
-                entry.Highlight.FillColor = GetColor(entry.Player)
+                entry.Highlight.FillColor = GetColor(entry.Model)
                 entry.Highlight.FillTransparency = 1 - Settings.Brightness
                 table.insert(validTargets, entry)
             else
@@ -154,9 +155,7 @@ table.insert(Connections, RunService.RenderStepped:Connect(function()
     end
     
     table.sort(validTargets, function(a, b)
-        local distA = a.IsC4 and -1 or a.Dist
-        local distB = b.IsC4 and -1 or b.Dist
-        return distA < distB
+        return a.Dist < b.Dist
     end)
     
     for i, entry in ipairs(validTargets) do
